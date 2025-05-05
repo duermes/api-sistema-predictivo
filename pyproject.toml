@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "sistema-predictivo-api"
+version = "0.1.0"
+description = "start of api for private project"
+authors = ["duermes"]
+readme = "README.md"
+license = "MIT"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.111.0"
+alembic = "^1.13.1"
+psycopg2-binary = "^2.9.9"
+httpx = "^0.27.0"
+pydantic = {extras = ["email"], version = "^2.7.4"}
+pydantic-settings = "^2.3.2"
+asyncpg = "^0.29.0"
+uvicorn = {extras = ["standard"], version = "^0.30.1"}
+sentry-sdk = "^2.5.1"
+sqlalchemy = {extras = ["asyncio"], version = "^2.0.30"}
+dbfread = "^2.0.7"
+pandas = "^2.2.3"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.4.8"
+
+[tool.poetry.group.prod.dependencies]
+gunicorn = "^22.0.0"
+python-json-logger = "^2.0.7"
+prometheus-client = "^0.20.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+process-dbf = "src.data.dbf_loader:main"
