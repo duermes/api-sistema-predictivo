@@ -47,7 +47,6 @@ process_dbf_to_csv(MSTOCK_DBF, MSTOCK_CSV, campos_mstockalm)
 process_dbf_to_csv(MPRODUCTO_DBF, MPRODUCTO_CSV)
 process_dbf_to_csv(MUSUARIO_DBF, MUSUARIO_CSV)
 
-
 # def main():
 #     process_dbf_to_csv(TFORMDET_DBF, TFORMDET_CSV, campos_tformdet)
 #     process_dbf_to_csv(MSTOCK_DBF, MSTOCK_CSV, campos_mstockalm)
