@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime
 from pathlib import Path
 from src.exceptions import NotFound, BadRequest
+import json
 
 
 router = APIRouter()
@@ -28,18 +29,12 @@ def date_to_annomes(date_obj: datetime) -> str:
 
 @router.get("/summary")
 async def get_summary(
-    start_date: str = Query(..., description="Fecha de inicio (DD-MM-YYYY)"),
-    end_date: str = Query(..., description="Fecha de fin (DD-MM-YYYY)"),
+    start_date: int = Query(..., description="Fecha de inicio (DD-MM-YYYY)"),
+    end_date: int = Query(..., description="Fecha de fin (DD-MM-YYYY)"),
     product_type: str = Query(None, description="Tipo de producto (opcional)"),
     strategy: str = Query(None, description="Estrategia de análisis (opcional)")
 ):
     try:
-        # NOthing of this is necesary anymore (i think)
-        # start_date = parse_date(start_date)
-        # end_date = parse_date(end_date)
-        start_ym = date_to_annomes(start_date)
-        end_ym = date_to_annomes(end_date)
-        
         tformdet = load_csv_data("tformdet.csv")
         mstockalm = load_csv_data("mstockalm.csv")
         mproducto = load_csv_data("mproducto.csv")
@@ -47,8 +42,8 @@ async def get_summary(
         # Filtrar por rango de fechas
         if 'ANNOMES' in tformdet.columns:
             tformdet_filtered = tformdet[
-                (tformdet['ANNOMES'] >= start_ym) & 
-                (tformdet['ANNOMES'] <= end_ym)
+                (tformdet['ANNOMES'] >= start_date) & 
+                (tformdet['ANNOMES'] <= end_date)
             ]
         else:
             tformdet_filtered = tformdet
@@ -63,6 +58,10 @@ async def get_summary(
                 right_on='MEDCOD', 
                 how='inner'
             )
+
+        # considerar editar esto luego
+        if 'MEDCOD' in tformdet_filtered.columns:
+            tformdet_filtered = tformdet_filtered.drop('MEDCOD', axis=1)
 
         # Filtrar por estrategia
         if strategy and 'MEDEST' in mproducto.columns:
@@ -105,12 +104,11 @@ async def get_summary(
             merged_data['TOTAL_CONSUMO'] = merged_data['VENTA'] + merged_data['SIS'] + merged_data['INTERSAN']
         
         result = merged_data.to_dict(orient='records')
-        
+
+        # DE ALGUNA MANERA AÑADIENDO ESTO TODOS MIS PROBLEMAS SE SOLUCIONARON NO TOCAR NUNCA BORRAR
+        result = merged_data.to_json(orient='records', date_format='iso')
+        result = json.loads(result)
         return {
-            "start_date": start_date,
-            "end_date": end_date,
-            "product_type": product_type,
-            "strategy": strategy,
             "count": len(result),
             "data": result
         }
