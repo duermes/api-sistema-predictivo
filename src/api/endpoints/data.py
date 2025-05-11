@@ -35,87 +35,131 @@ async def get_summary(
     strategy: str = Query(None, description="Estrategia de análisis (opcional)")
 ):
     try:
-        tformdet = load_csv_data("tformdet.csv")
-        mstockalm = load_csv_data("mstockalm.csv")
-        mproducto = load_csv_data("mproducto.csv")
+        tformdet_orig = load_csv_data("tformdet.csv")
+        mstockalm_orig = load_csv_data("mstockalm.csv") # NOT using it
+        mproducto_orig = load_csv_data("mproducto.csv")
 
-        # Filtrar por rango de fechas
-        if 'ANNOMES' in tformdet.columns:
-            tformdet_filtered = tformdet[
-                (tformdet['ANNOMES'] >= start_date) & 
-                (tformdet['ANNOMES'] <= end_date)
-            ]
+        mproducto = mproducto_orig.copy()
+        if product_type:
+            mproducto = mproducto[mproducto["MEDTIP"] == product_type]
+        if strategy:
+            mproducto = mproducto[mproducto["MEDEST"] == strategy]
+        
+        mproducto_cols_to_select = ["MEDCOD", "MEDNOM", "MEDPRES", "MEDCNC", "MEDTIP", "MEDPET", "MEDFF", "MEDEST"]
+        mproducto_unique = mproducto[mproducto_cols_to_select].drop_duplicates(subset=["MEDCOD"])
+        print(f"mproducto_unique tiene {mproducto_unique.shape[0]} filas y {mproducto_unique.shape[1]} columnas.")
+
+        tformdet = tformdet_orig.copy()
+        tformdet = tformdet[(tformdet["ANNOMES"] >= start_date) & (tformdet["ANNOMES"] <= end_date)]
+
+        anomes = len(tformdet["ANNOMES"].unique())
+         
+        if tformdet.empty:
+            return {"count": 0, "data count": 0, "data": []}
+
+        tformdet["TOTAL_CONSUMO"] = tformdet[["VENTA", "SIS", "INTERSAN"]].sum(axis=1)
+        
+        if product_type or strategy:
+            tformdet = tformdet.merge(mproducto_unique[["MEDCOD"]], left_on="CODIGO_MED", right_on="MEDCOD", how="inner")
+            if tformdet.empty:
+                return {"count": 0, "data count": 0, "data": []}
+
+        # Pivot
+        if tformdet.empty: # Just a filter, shouldn''t happen but its better be careful no?
+            consumo_pivot = pd.DataFrame(columns=["CODIGO_MED"]).set_index("CODIGO_MED")
         else:
-            tformdet_filtered = tformdet
-                    
-        # Filtrar por tipo de producto
-        if product_type and 'MEDTIP' in mproducto.columns:
-            mproducto_filtered = mproducto[mproducto['MEDTIP'] == product_type]
-            tformdet_filtered = pd.merge(
-                tformdet_filtered, 
-                mproducto_filtered[['MEDCOD']], 
-                left_on='CODIGO_MED', 
-                right_on='MEDCOD', 
-                how='inner'
-            )
+            consumo_mensual = tformdet.groupby(["CODIGO_MED", "ANNOMES"])["TOTAL_CONSUMO"].sum().reset_index()
+            if consumo_mensual.empty:
+                consumo_pivot = pd.DataFrame(columns=["CODIGO_MED"]).set_index("CODIGO_MED")
+            else:
+                consumo_pivot = consumo_mensual.pivot(index="CODIGO_MED", columns="ANNOMES", values="TOTAL_CONSUMO").fillna(0)
 
-        # considerar editar esto luego
-        if 'MEDCOD' in tformdet_filtered.columns:
-            tformdet_filtered = tformdet_filtered.drop('MEDCOD', axis=1)
+        # CPMA
+        month_columns = [col for col in consumo_pivot.columns if isinstance(col, (int, float))] 
+        
+        if not month_columns:
+            consumo_pivot["CPMA"] = 0.0
+            consumo_pivot["CONSUMO_MEN"] = 0
+        else:
+            consumo_pivot["CPMA"] = consumo_pivot[month_columns].mean(axis=1)
+            consumo_pivot["CONSUMO_MEN"] = (consumo_pivot[month_columns] > 0).sum(axis=1)
 
-        # Filtrar por estrategia
-        if strategy and 'MEDEST' in mproducto.columns:
-            mproducto_strategy = mproducto[mproducto['MEDEST'] == strategy]
-            
-            if not tformdet_filtered.empty and not mproducto_strategy.empty:
-                tformdet_filtered = pd.merge(
-                    tformdet_filtered,
-                    mproducto_strategy[['MEDCOD']],
-                    left_on='CODIGO_MED',
-                    right_on='MEDCOD',
-                    how='inner'
-                )
-            
-        merged_data = tformdet_filtered.copy()
+        months = [str(col) for col in sorted(month_columns)]
         
-        # Unir con mstockalm
-        if not tformdet_filtered.empty and not mstockalm.empty:
-            if 'CODIGO_MED' in tformdet_filtered.columns and 'MEDCOD' in mstockalm.columns:
-                merged_data = pd.merge(
-                    tformdet_filtered, 
-                    mstockalm, 
-                    left_on='CODIGO_MED', 
-                    right_on='MEDCOD', 
-                    how='left'
-                )
-        
-        # Unir con mproducto
-        if not merged_data.empty and not mproducto.empty:
-            if 'CODIGO_MED' in merged_data.columns and 'MEDCOD' in mproducto.columns:
-                merged_data = pd.merge(
-                    merged_data, 
-                    mproducto, 
-                    left_on='CODIGO_MED', 
-                    right_on='MEDCOD', 
-                    how='left'
-                )
-        
-        if all(col in merged_data.columns for col in ['VENTA', 'SIS', 'INTERSAN']):
-            merged_data['TOTAL_CONSUMO'] = merged_data['VENTA'] + merged_data['SIS'] + merged_data['INTERSAN']
-        
-        result = merged_data.to_dict(orient='records')
+        consumo_pivot = consumo_pivot.reset_index() 
 
-        # DE ALGUNA MANERA AÑADIENDO ESTO TODOS MIS PROBLEMAS SE SOLUCIONARON NO TOCAR NUNCA BORRAR
-        result = merged_data.to_json(orient='records', date_format='iso')
-        result = json.loads(result)
+        if not tformdet.empty:
+            latest_stock_fin_in_period = tformdet.sort_values("ANNOMES", ascending=False)\
+                                             .drop_duplicates(subset=["CODIGO_MED"], keep="first")\
+                                             [["CODIGO_MED", "STOCK_FIN"]]
+            consumo_pivot = consumo_pivot.merge(latest_stock_fin_in_period, on="CODIGO_MED", how="left")
+        else:
+            consumo_pivot["STOCK_FIN"] = pd.NA 
+
+        if "STOCK_FIN" not in consumo_pivot.columns:
+            consumo_pivot["STOCK_FIN"] = pd.NA
+        consumo_pivot["STOCK_FIN"] = consumo_pivot["STOCK_FIN"].fillna(0) 
+
+        consumo_pivot["NIVELES"] = consumo_pivot["STOCK_FIN"].astype(float) / consumo_pivot["CPMA"].astype(float)
+        consumo_pivot["NIVELES"] = consumo_pivot["NIVELES"].replace([float('inf'), -float('inf')], float('nan'))
+        consumo_pivot["NIVELES"] = consumo_pivot["NIVELES"].fillna(0) 
+
+        def situacion(nivel, cpma):
+            if pd.isna(nivel):
+                 return "Indeterminado" 
+            if cpma == 0:
+                if nivel > 0 : 
+                    return "Sobrestock (Sin Consumo)" 
+                else: 
+                    return "Normostock (Sin Movimiento)" 
+            if nivel > 7:
+                return "Sobrestock"
+            elif nivel < 1: 
+                return "Substock"
+            else:
+                return "Normostock"
+
+        consumo_pivot["SITUACION"] = consumo_pivot.apply(lambda row: situacion(row["NIVELES"], row["CPMA"]), axis=1)
+    
+        consumo_pivot = consumo_pivot.merge(mproducto_unique, left_on="CODIGO_MED", right_on="MEDCOD", how="left")
+        
+        if 'MEDCOD_y' in consumo_pivot.columns:
+             consumo_pivot = consumo_pivot.drop(columns=['MEDCOD_y'])
+        if 'MEDCOD_x' in consumo_pivot.columns and 'CODIGO_MED' in consumo_pivot.columns: 
+             pass 
+
+        ordered_columns = ["CODIGO_MED"] + \
+                          [col for col in month_columns if col in consumo_pivot.columns] + \
+                          ["CPMA", "CONSUMO_MEN", "STOCK_FIN", "NIVELES", "SITUACION"] + \
+                          [col for col in mproducto_cols_to_select if col != "MEDCOD" and col in consumo_pivot.columns] 
+
+        for col in ordered_columns:
+            if col not in consumo_pivot.columns:
+                consumo_pivot[col] = None 
+
+        consumo_pivot = consumo_pivot[ordered_columns]
+
+        desc_cols = ["MEDNOM", "MEDPRES", "MEDCNC", "MEDTIP", "MEDPET", "MEDFF", "MEDEST"]
+        for col in desc_cols:
+            if col in consumo_pivot.columns:
+                consumo_pivot[col] = consumo_pivot[col].fillna("Desconocido") 
+
+        json_string = consumo_pivot.to_json(orient="records", date_format="iso", default_handler=str)
+        data_output = json.loads(json_string)
+
         return {
-            "count": len(result),
-            "data": result
+            "count": len(consumo_pivot),
+            "data count": len(data_output),
+            "anomes": anomes,
+            "months": months,
+            "data": data_output
         }
     except ValueError as e:
         raise BadRequest(detail=f"Error en formato de fecha: {str(e)}")
     except Exception as e:
         raise BadRequest(detail=f"Error al procesar datos: {str(e)}")
+    except FileNotFoundError as e:
+        raise NotFound(detail=f"Error: Archivo CSV no encontrado - {str(e)}")
     
 
 # @router.get("/consumo")
