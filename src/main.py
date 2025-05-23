@@ -7,7 +7,6 @@ from starlette.middleware.cors import CORSMiddleware
 from src.api.routes import api_router
 from src.config import app_configs, settings
 
-
 @asynccontextmanager
 async def lifespan(_application: FastAPI) -> AsyncGenerator:
     # Startup
